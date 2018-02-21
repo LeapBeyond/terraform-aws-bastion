@@ -13,3 +13,7 @@ output "table_name" {
 output "table_arn" {
   value = "${aws_dynamodb_table.dynamodb-terraform-state-lock.arn}"
 }
+
+output "encryption_key_arn" {
+  value="${aws_kms_key.state.arn}"
+}
