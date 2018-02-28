@@ -188,6 +188,10 @@ resource "aws_route_table" "bastion" {
     gateway_id = "${aws_internet_gateway.bastion_gateway.id}"
   }
 
+  lifecycle {
+    ignore_changes = ["*"]
+  }
+
   tags {
     Name    = "bastion-rt"
     Project = "${var.tags["project"]}"
@@ -209,6 +213,10 @@ resource "aws_route_table" "protected" {
     nat_gateway_id = "${aws_nat_gateway.gw.id}"
   }
 
+  lifecycle {
+    ignore_changes = ["*"]
+  }
+
   tags {
     Name    = "protected-rt"
     Project = "${var.tags["project"]}"
@@ -228,6 +236,10 @@ resource "aws_route_table" "protected_nat" {
   route {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = "${aws_internet_gateway.protected_gateway.id}"
+  }
+
+  lifecycle {
+    ignore_changes = ["*"]
   }
 
   tags {
@@ -256,6 +268,202 @@ resource "aws_route" "bastion_to_protected" {
 }
 
 # --------------------------------------------------------------------------------------------------------------
+# NACL
+# --------------------------------------------------------------------------------------------------------------
+resource "aws_network_acl" "bastion" {
+  vpc_id     = "${aws_vpc.bastion_vpc.id}"
+  subnet_ids = ["${aws_subnet.bastion.id}"]
+
+  tags {
+    Name    = "bastion"
+    Project = "${var.tags["project"]}"
+    Owner   = "${var.tags["owner"]}"
+    Client  = "${var.tags["client"]}"
+  }
+}
+
+resource "aws_network_acl_rule" "bastion_ssh_in" {
+  count          = "${length(var.ssh_inbound)}"
+  network_acl_id = "${aws_network_acl.bastion.id}"
+  rule_number    = "${100 + count.index}"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.ssh_inbound[count.index]}"
+  from_port      = 22
+  to_port        = 22
+}
+
+resource "aws_network_acl_rule" "bastion_ssh_out" {
+  count          = "${length(var.ssh_inbound)}"
+  network_acl_id = "${aws_network_acl.bastion.id}"
+  rule_number    = "${100 + count.index}"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.ssh_inbound[count.index]}"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl_rule" "bastion_ssh_to_protected" {
+  network_acl_id = "${aws_network_acl.bastion.id}"
+  rule_number    = "200"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.protected_subnet_cidr}"
+  from_port      = 22
+  to_port        = 22
+}
+
+resource "aws_network_acl_rule" "bastion_ssh_from_protected" {
+  network_acl_id = "${aws_network_acl.bastion.id}"
+  rule_number    = "200"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.protected_subnet_cidr}"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl_rule" "bastion_http_out" {
+  network_acl_id = "${aws_network_acl.bastion.id}"
+  rule_number    = "220"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 80
+  to_port        = 80
+}
+
+resource "aws_network_acl_rule" "bastion_http_in" {
+  network_acl_id = "${aws_network_acl.bastion.id}"
+  rule_number    = "220"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl" "protected" {
+  vpc_id     = "${aws_vpc.protected_vpc.id}"
+  subnet_ids = ["${aws_subnet.protected.id}"]
+
+  tags {
+    Name    = "protected"
+    Project = "${var.tags["project"]}"
+    Owner   = "${var.tags["owner"]}"
+    Client  = "${var.tags["client"]}"
+  }
+}
+
+resource "aws_network_acl_rule" "protected_ssh_in" {
+  network_acl_id = "${aws_network_acl.protected.id}"
+  rule_number    = "100"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.bastion_subnet_cidr}"
+  from_port      = 22
+  to_port        = 22
+}
+
+resource "aws_network_acl_rule" "protected_ssh_out" {
+  network_acl_id = "${aws_network_acl.protected.id}"
+  rule_number    = "100"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.bastion_subnet_cidr}"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl_rule" "protected_http_out" {
+  network_acl_id = "${aws_network_acl.protected.id}"
+  rule_number    = "200"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 80
+  to_port        = 80
+}
+
+resource "aws_network_acl_rule" "protected_http_in" {
+  network_acl_id = "${aws_network_acl.protected.id}"
+  rule_number    = "200"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl" "protected_nat" {
+  vpc_id     = "${aws_vpc.protected_vpc.id}"
+  subnet_ids = ["${aws_subnet.protected_nat.id}"]
+
+  tags {
+    Name    = "protected_nat"
+    Project = "${var.tags["project"]}"
+    Owner   = "${var.tags["owner"]}"
+    Client  = "${var.tags["client"]}"
+  }
+}
+
+resource "aws_network_acl_rule" "protected_nat_http_out" {
+  network_acl_id = "${aws_network_acl.protected_nat.id}"
+  rule_number    = "100"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 80
+  to_port        = 80
+}
+
+resource "aws_network_acl_rule" "protected_nat_http_in" {
+  network_acl_id = "${aws_network_acl.protected_nat.id}"
+  rule_number    = "100"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+resource "aws_network_acl_rule" "nat_http_from_protected" {
+  network_acl_id = "${aws_network_acl.protected_nat.id}"
+  rule_number    = "200"
+  egress         = false
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.protected_subnet_cidr}"
+  from_port      = 80
+  to_port        = 80
+}
+
+resource "aws_network_acl_rule" "nat_http_to_protected" {
+  network_acl_id = "${aws_network_acl.protected_nat.id}"
+  rule_number    = "200"
+  egress         = true
+  protocol       = "tcp"
+  rule_action    = "allow"
+  cidr_block     = "${var.protected_subnet_cidr}"
+  from_port      = 1024
+  to_port        = 65535
+}
+
+
+# --------------------------------------------------------------------------------------------------------------
 # security groups
 # --------------------------------------------------------------------------------------------------------------
 resource "aws_security_group" "bastion_ssh_access" {
@@ -271,12 +479,53 @@ resource "aws_security_group" "bastion_ssh_access" {
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
+resource "aws_security_group" "bastion_ssh_out" {
+  name        = "bastion-ssh-out"
+  description = "allows ssh access from the bastion host"
+  vpc_id      = "${aws_vpc.bastion_vpc.id}"
+
+  ingress {
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["${var.protected_subnet_cidr}"]
+  }
+
+  egress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["${var.protected_subnet_cidr}"]
+  }
+}
+
+resource "aws_security_group" "bastion_http_out" {
+  name        = "bastion-http"
+  description = "allows http out"
+  vpc_id      = "${aws_vpc.bastion_vpc.id}"
+
+  ingress {
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 
 resource "aws_security_group" "protected_ssh_access" {
   name        = "protected-ssh"
@@ -291,12 +540,33 @@ resource "aws_security_group" "protected_ssh_access" {
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["${var.bastion_subnet_cidr}"]
+  }
+}
+
+resource "aws_security_group" "protected_http_out" {
+  name        = "protected-http"
+  description = "allows http requests via nat gateway"
+  vpc_id      = "${aws_vpc.protected_vpc.id}"
+
+  ingress {
+    from_port   = 1024
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
+
 
 # --------------------------------------------------------------------------------------------------------------
 # EC2 instances
@@ -320,7 +590,7 @@ resource "aws_instance" "bastion" {
   instance_type          = "${var.instance_type}"
   key_name               = "${var.bastion_key}"
   subnet_id              = "${aws_subnet.bastion.id}"
-  vpc_security_group_ids = ["${aws_security_group.bastion_ssh_access.id}"]
+  vpc_security_group_ids = ["${aws_security_group.bastion_ssh_access.id}", "${aws_security_group.bastion_ssh_out.id}", "${aws_security_group.bastion_http_out.id}"]
 
   root_block_device = {
     volume_type = "gp2"
@@ -378,7 +648,7 @@ resource "aws_instance" "protected" {
   ami                         = "${data.aws_ami.target_ami.id}"
   instance_type               = "${var.instance_type}"
   key_name                    = "${var.protected_key}"
-  vpc_security_group_ids      = ["${aws_security_group.protected_ssh_access.id}"]
+  vpc_security_group_ids      = ["${aws_security_group.protected_ssh_access.id}", "${aws_security_group.protected_http_out.id}"]
   subnet_id                   = "${aws_subnet.protected.id}"
 
   root_block_device = {
