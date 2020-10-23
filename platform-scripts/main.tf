@@ -567,17 +567,13 @@ resource "aws_security_group" "protected_http_out" {
   }
 }
 
-
 # --------------------------------------------------------------------------------------------------------------
 # EC2 instances
 # --------------------------------------------------------------------------------------------------------------
 data "aws_ami" "target_ami" {
+  owners = [ "amazon" ]
   most_recent = true
 
-  filter {
-    name   = "owner-alias"
-    values = ["amazon"]
-  }
 
   filter {
     name   = "name"
